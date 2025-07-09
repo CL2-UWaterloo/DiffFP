@@ -3,7 +3,7 @@
 This repository contains supplementary videos for the paper:
 
 > **DiffusionFSP: Learning Behaviors from Scratch via Diffusion-based Fictitious Self-Play**  
-> [Under Review]  
+> [Under Review]  (Updating) 
 
 ## 🎥 Supplementary Videos
 
