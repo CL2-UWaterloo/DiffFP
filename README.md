@@ -2,9 +2,15 @@
 
 This repository contains the MPE code and supplementary videos for the paper:
 
-> **DiffFP: Learning Behaviors from Scratch via Diffusion-based Fictitious Play**  
-> [Under Review]
-
+> @misc{karthikeyan2025difffplearningbehaviorsscratch,
+      title={DiffFP: Learning Behaviors from Scratch via Diffusion-based Fictitious Play}, 
+      author={Akash Karthikeyan and Yash Vardhan Pant},
+      year={2025},
+      eprint={2511.13186},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2511.13186}, 
+}
 ## Code (MPE Experiments)
 
 Fictitious play with diffusion-policy best responses on the MPE games.
