@@ -40,11 +40,18 @@ python mpe_multi_adv.py --algo dipo   # DiffFP (diffusion best response)
 python mpe_multi_adv.py --algo sac    # SACFP baseline
 python mpe_multi_adv.py --algo td3    # TD3FP baseline
 python mpe_multi_adv.py --algo qsm    # QSMFP baseline
+python mpe_multi_adv.py --algo qvpo --weighted --aug   # QVPO: Q-weighted regression variant
 ```
 
+For `--algo qvpo`, `--weighted` enables Q-weighted regression on the diffusion
+loss (transform selected via `--q_transform`; the default `qadv`
+advantage-style transform requires `--aug`, while e.g. `--q_transform qexpn`
+— the classic RWR `exp(βQ)` weighting — works without it).
+
 `agent/` contains the diffusion best-response agent (`DiPo.py`, `diffusion.py`)
-with the double-Q critic and Q-guided action refinement, the SAC / TD3 / QSM
-baseline agents, and the shared networks in `networks.py`.
+with the double-Q critic and Q-guided action refinement, the SAC / TD3 / QSM /
+QVPO baseline agents (`q_transform.py` holds the Q-weighting schemes), and the
+shared networks in `networks.py`.
 
 ## 🎥 Supplementary Videos
 

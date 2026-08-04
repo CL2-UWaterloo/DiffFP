@@ -14,13 +14,14 @@ from agent.DiPo import DiPo
 from agent.sac import SAC
 from agent.td3 import TD3
 from agent.qsm import DiPo as QSM
+from agent.qvpo import QVPO
 from agent.replay_memory import ReplayMemory, DiffusionMemory
 from pettingzoo.mpe import simple_tag_v3
 import imageio
 
 # Best-response learners: all expose the same interface
 # (sample_action / append_memory / train / .actor callable as actor(state, eval=...)).
-ALGOS = {'dipo': DiPo, 'sac': SAC, 'td3': TD3, 'qsm': QSM}
+ALGOS = {'dipo': DiPo, 'sac': SAC, 'td3': TD3, 'qsm': QSM, 'qvpo': QVPO}
 
 def readParser():
     parser = argparse.ArgumentParser(description='Diffusion Policy')
@@ -63,7 +64,7 @@ def readParser():
     parser.add_argument('--ac_grad_norm', type=float, default=2.0, metavar='G',
                         help='actor and critic grad norm (default: 1.0)')
 
-    parser.add_argument('--algo', type=str, default='dipo', choices=['dipo', 'sac', 'td3', 'qsm'],
+    parser.add_argument('--algo', type=str, default='dipo', choices=['dipo', 'sac', 'td3', 'qsm', 'qvpo'],
                         help='best-response learner (default: dipo)')
     # SAC-specific
     parser.add_argument('--actor_lr', type=float, default=0.0003, metavar='G',
@@ -82,6 +83,43 @@ def readParser():
     # QSM-specific
     parser.add_argument('--q_grad_coeff', type=float, default=10.0, metavar='G',
                         help='QSM critic-gradient scaling coefficient (default: 10.0)')
+    # QVPO-specific (Q-weighted regression on the diffusion loss; enable with --weighted)
+    parser.add_argument('--weighted', action="store_true",
+                        help='QVPO: weight the diffusion loss by transformed Q-values')
+    parser.add_argument('--q_transform', type=str, default='qadv', metavar='S',
+                        help='QVPO: Q-weight transform (qrelu, qexpn, qcut, qcutn, qadv)')
+    parser.add_argument('--aug', action="store_true",
+                        help='QVPO: sample-augmentation path instead of the diffusion buffer')
+    parser.add_argument('--gradient', action="store_true",
+                        help='QVPO: use gradient-based augmentation')
+    parser.add_argument('--beta', type=float, default=1.0, metavar='G',
+                        help='QVPO: exp-weighting temperature (default: 1.0)')
+    parser.add_argument('--alpha_mean', type=float, default=0.001, metavar='G',
+                        help='QVPO: running Q-mean update rate (default: 0.001)')
+    parser.add_argument('--alpha_std', type=float, default=0.001, metavar='G',
+                        help='QVPO: running Q-std update rate (default: 0.001)')
+    parser.add_argument('--chosen', type=int, default=1, metavar='N',
+                        help='QVPO: candidates kept per state (default: 1)')
+    parser.add_argument('--q_neg', type=float, default=0.0, metavar='G',
+                        help='QVPO: Q offset for weighting (default: 0.0)')
+    parser.add_argument('--cut', type=float, default=1.0, metavar='G',
+                        help='QVPO: weight cutoff (default: 1.0)')
+    parser.add_argument('--train_sample', type=int, default=64, metavar='N',
+                        help='QVPO: training candidate samples (default: 64)')
+    parser.add_argument('--behavior_sample', type=int, default=4, metavar='N',
+                        help='QVPO: behavior-time action candidates ranked by Q (default: 4)')
+    parser.add_argument('--target_sample', type=int, default=4, metavar='N',
+                        help='QVPO: target-actor action candidates (default: 4)')
+    parser.add_argument('--eval_sample', type=int, default=32, metavar='N',
+                        help='QVPO: eval-time action candidates ranked by Q (default: 32)')
+    parser.add_argument('--deterministic', action="store_true",
+                        help='QVPO: noiseless sampling at eval')
+    parser.add_argument('--policy_freq', type=int, default=1, metavar='N',
+                        help='QVPO: actor update period (default: 1)')
+    parser.add_argument('--epsilon', type=float, default=0.0, metavar='G',
+                        help='QVPO: probability of plain (non-Q-ranked) sampling (default: 0.0)')
+    parser.add_argument('--entropy_alpha', type=float, default=0.02, metavar='G',
+                        help='QVPO: entropy regularization weight (default: 0.02)')
 
     parser.add_argument('--cuda', default='cuda:0',
                         help='run on CUDA (default: cuda:0)')
@@ -105,11 +143,27 @@ class FSPTrainer:
         agent1, agent2 = self._initialize_agents()
         self.agent1 = agent1
         self.agent2 = agent2
-        self.policy_avg_ego = [copy.deepcopy(self.agent1.actor)]
-        self.policy_avg_opp = [copy.deepcopy(self.agent2.actor)]
+        self.policy_avg_ego = [self.snapshot_policy(self.agent1)]
+        self.policy_avg_opp = [self.snapshot_policy(self.agent2)]
         self.p_sample_dist_ego = [1.0]
         self.p_sample_dist_opp = [1.0]
         self.global_step = 0
+
+    def snapshot_policy(self, agent):
+        """Freeze the agent's current policy for the FP averaging pool.
+
+        Every pool entry is callable as policy(state, eval=...). QVPO actors
+        rank sampled action candidates by Q at generation time, so for QVPO the
+        critic is snapshotted together with the actor."""
+        actor_copy = copy.deepcopy(agent.actor)
+        if self.args.algo == 'qvpo':
+            critic_copy = copy.deepcopy(agent.critic)
+
+            def policy(state, eval=False):
+                return actor_copy(state, eval, q_func=critic_copy, normal=False)
+
+            return policy
+        return actor_copy
 
     def _initialize_environment(self):
         # Note: using the parallel API here.
@@ -313,10 +367,12 @@ class FSPTrainer:
                             episode_reward += rewards[agent]
 
                 # Train the appropriate agent
-                if agent_name == 'ego':
-                    self.agent1.train(8, batch_size=self.args.batch_size, log_writer=self.logger)
-                elif agent_name == 'opp':
-                    self.agent2.train(8, batch_size=self.args.batch_size, log_writer=self.logger)
+                trained_agent = self.agent1 if agent_name == 'ego' else self.agent2
+                if self.args.algo == 'qvpo':
+                    # QVPO's train() takes the global step first (for its schedules).
+                    trained_agent.train(self.global_step, 8, batch_size=self.args.batch_size, log_writer=self.logger)
+                else:
+                    trained_agent.train(8, batch_size=self.args.batch_size, log_writer=self.logger)
 
                 steps += 1  # One joint step across all agents
                 self.global_step += 1
@@ -329,11 +385,11 @@ class FSPTrainer:
 
         # Update average policy distribution
         if agent_name == 'ego':
-            new_policy = copy.deepcopy(self.agent1.actor)
+            new_policy = self.snapshot_policy(self.agent1)
             self.policy_avg_ego.append(new_policy)
             self.p_sample_dist_ego = self.update_policy_distribution(self.policy_avg_ego, self.p_sample_dist_ego)
         else:
-            new_policy = copy.deepcopy(self.agent2.actor)
+            new_policy = self.snapshot_policy(self.agent2)
             self.policy_avg_opp.append(new_policy)
             self.p_sample_dist_opp = self.update_policy_distribution(self.policy_avg_opp, self.p_sample_dist_opp)
 
