@@ -1,9 +1,44 @@
-# DiffusionFSP: Learning Behaviors from Scratch via Diffusion-based Fictitious Self-Play
+# DiffFP: Learning Behaviors from Scratch via Diffusion-based Fictitious Play
 
-This repository contains supplementary videos for the paper:
+This repository contains the MPE code and supplementary videos for the paper:
 
-> **DiffusionFSP: Learning Behaviors from Scratch via Diffusion-based Fictitious Self-Play**  
+> **DiffFP: Learning Behaviors from Scratch via Diffusion-based Fictitious Play**  
 > [Under Review]
+
+## Code (MPE Experiments)
+
+Fictitious play with diffusion-policy best responses on the MPE games.
+
+### Setup
+
+```bash
+pip install -r requirements.txt
+# Custom PettingZoo fork (required — modified simple_adversary / simple_tag)
+git clone https://github.com/Aku02/PettingZoo.git
+pip install -e ./PettingZoo
+```
+
+### Run
+
+```bash
+python mpe_multi_adv.py    # MPE-Adversary: 2 ego agents + 1 adversary, 3 landmarks
+python mpe_multi_tag.py    # MPE-Tag: 1 ego agent vs 3 adversaries
+```
+
+Both trainers accept `--algo {dipo, sac, td3, qsm}` to select the
+best-response learner inside the fictitious-play loop (default: `dipo`,
+the diffusion policy):
+
+```bash
+python mpe_multi_adv.py --algo dipo   # DiffFP (diffusion best response)
+python mpe_multi_adv.py --algo sac    # SACFP baseline
+python mpe_multi_adv.py --algo td3    # TD3FP baseline
+python mpe_multi_adv.py --algo qsm    # QSMFP baseline
+```
+
+`agent/` contains the diffusion best-response agent (`DiPo.py`, `diffusion.py`)
+with the double-Q critic and Q-guided action refinement, the SAC / TD3 / QSM
+baseline agents, and the shared networks in `networks.py`.
 
 ## 🎥 Supplementary Videos
 
@@ -15,7 +50,7 @@ This repository contains supplementary videos for the paper:
   <img src="assets/epi3.gif" width="30%" />
 </p>
 
-<p align="center"><em>MPE - Adversary: Model Stochasticity. We fix the seed and run the evaluation three times to demonstrate the inherent stochasticity in the model. We observe that using DiffFSP leads to learning more diverse strategies</em></p>
+<p align="center"><em>MPE - Adversary: Model Stochasticity. We fix the seed and run the evaluation three times to demonstrate the inherent stochasticity in the model. We observe that using DiffFP leads to learning more diverse strategies</em></p>
 
 ---
 
@@ -45,12 +80,12 @@ This repository contains supplementary videos for the paper:
 
 <p align="center">
   <img src="assets/QSM_fail.gif" width="45%" />
-  <img src="assets/DiffFSP_violation.gif" width="45%" />
+  <img src="assets/DiffFP_violation.gif" width="45%" />
 </p>
 
 <p align="center">
 <em>
-Racetrack: Left (QSMFSP) fails to perform a lane change and instead rear-ends the opponent. The agents make decisions based solely on local observations and do not have access to the full state of all agents. Right: DiffFSP infers the presence of agents ahead and chooses to violate track boundaries in order to overtake them.
+Racetrack: Left (QSMFP) fails to perform a lane change and instead rear-ends the opponent. The agents make decisions based solely on local observations and do not have access to the full state of all agents. Right: DiffFP infers the presence of agents ahead and chooses to violate track boundaries in order to overtake them.
 </em>
 </p>
 
